@@ -1,0 +1,52 @@
+---
+title: "PPA Generative Modeling"
+author: "Chris H. Wilson"
+date: "May 12, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE);
+library(ggplot2);
+```
+
+The ultimate goal for this project is to link remote sensing data to reforestation models applied to abandoned pasture in Azuero Peninsula, Panama. The analytical framework we are using is based on the Perfect Plasticitiy Approximation as in (e.g. citations), a model which ultimately relates demographic parameters to canopy area, assuming the pantropical allometry.
+
+The final analytical product will be a multi-part hierarchical Bayesian model incorporating multiple sets of remote sensing data, field data, and prior distributions based on literature, and computational considerations. However, several features of the remote sensing data are remarkable, including 1) significant inter-annual variability, and 2) significant phenological effects. Thus, a critical task is to attempt to discern a structural signal from these noisy data. 
+
+
+
+```{r 'Basic PPA', echo = FALSE}
+# Define function
+PPA_traj <- function(muR,muSUR,muGRO,plot_area = 30,c1 = 1, D = 1.7, years = 15){
+  mu <- rep(0,years); 
+  for(i in 1:years){
+  mu[i] = ((c1*(muR/plot_area))*(muGRO+D*muSUR-exp(-(i*muSUR))*(muGRO+D*muSUR + muGRO*(i*muSUR)))/(muSUR^2));
+  }
+  return(mu);
+}
+
+# Set point values 
+muR <- 2;
+SUR <- 0.8;
+muSUR <- 1 - SUR;
+muGRO <- 0.5; 
+
+# Draw a single simulation
+CA_true <- PPA_traj(muR,muSUR,muGRO);
+
+single_sim_df <- data.frame(CA=CA_true, time = seq(1,length(CA_true),1));
+ggplot(single_sim_df, aes(x=time,y=CA)) + geom_line();
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r , echo=FALSE}
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
