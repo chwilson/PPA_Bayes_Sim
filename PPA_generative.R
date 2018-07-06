@@ -25,16 +25,17 @@ logit_link <- function(x,a,b){
   return(logit); 
 }
 
+
+# Single trajectory simulation 
 muR <- 2;
 SUR <- 0.8;
 muSUR <- 1 - SUR;
 muGRO <- 0.5; 
-
 CA_true <- PPA_traj(muR,muSUR,muGRO);
 
 
-# Replicated datasets 
-?rbeta
+#### Replicated datasets 
+# PPA Parameters 
 muR <- rnorm(10^3,1,0.5);
 SUR <- rbeta(10^3, 8, 2);
 muSUR <- 1-SUR;
@@ -42,17 +43,30 @@ muGRO_1 <- rnorm(10^3,0.5,0.25);
 muGRO_2 <- runif(10^3,0.1,1.1);
 #muGRO <- 0.5*muGRO_1 + 0.5*muGRO_2; # convolved prior
 muGRO <- muGRO_1; 
-phi_CA <- rnorm(10^3, )
-phi_pheno <- rnorm(10^3, )
-phi_annual <- rnorm(10^3, 30, 10); 
+# CA model parameters 
+phi_CA <- rnorm(10^3, 1.5, 0.2) # Posterior SE = 0.09 
+CA_int_logit <- rnorm(10^3, -4.08, 0.5) # Posterior SE = 0.25
+CA_slope_logit <- rnorm(10^3, 5.86, 0.7) # Posterior SE = 0.37 
 
-param_mat <- cbind(muR,muSUR,muGRO,phi);
+# Annual phenology parameters
+phi_pheno <- rnorm(10^3, 6, 1); # Posterior from data: Normal(5.96,0.06)
+pheno_int_logit <- rnorm(10^3,0.65,0.1); # Posterior SE = 0.01
+pheno_slope_logit <- rnorm(10^3,-1.9,0.1); # Posterior SE = 0.03 
+mm <- runif(10^3,-0.4,1); # Random ranges for mm 
+
+# Interannual stochasticity 
+phi_annual <- rnorm(10^3, 30, 10);
 
 
-param_mat2 <- ifelse(param_mat >= 0, param_mat, NA);
+param_mat <- cbind(muR,muSUR,muGRO,phi_CA,CA_int_logit,CA_slope_logit,
+                   phi_pheno,pheno_int_logit,pheno_slope_logit, phi_annual,mm);
+
+
+param_mat2 <- ifelse(param_mat[,1:4] >= 0, param_mat, NA);
 row.has.na <- apply(param_mat2, 1, function(x){any(is.na(x))});
 naRows <- sum(row.has.na);
 paramMat.filtered <- param_mat2[!row.has.na,]; 
+
 
 
 CA_trueMAT <- matrix(0,10^3,15); 
@@ -95,19 +109,28 @@ ggplot(data = data.frame(x = c(0,1)),aes(x)) + stat_function(fun = logit_link, a
 # Starting with a "true" CA matrix, then adding CA --> PSN, then PSN phenology, then interannual stochasticity
 
 CA_trueMAT <- matrix(0,10^3,15); 
-CA_obsMAT <- matrix(0,10^3,15); 
+PSN_trueMAT <- matrix(0,10^3,15);
+PSN_phenoMAT <- matrix(0,10^3,15);
+PSN_obsMAT <- matrix(0,10^3,15); 
+str(paramMat.filtered)
+paramMat.filtered <- param_mat
+naRows <- 0
 for(i in 1:(10^3-naRows)){
   CA_trueMAT[i,] <- ifelse(PPA_traj(paramMat.filtered[i,1],paramMat.filtered[i,2],paramMat.filtered[i,3])<1,
                            PPA_traj(paramMat.filtered[i,1],paramMat.filtered[i,2],paramMat.filtered[i,3]),1);
   for(j in 1:15){
-   PSN_trueMAT[i,] <- logit_link(CA_trueMAT[i,], a = -5, b = 7);
-   PSN_phenoMAT[i,] <- rbeta(PSN_trueMAT[i,] - logit_link(mm[i,], a = 1.4, b = -1.9); 
- # CA_obsMAT[i,j] <- logit_link(x=rnorm(1,mean=CA_trueMAT[i,j], sd = CA_trueMAT[i,j]*0.2),a=-3,b=8); 
-   CA_obsMAT[i,j] <- rbeta(1, shape1 = paramMat.filtered[i,4]*CA_trueMAT[i,j], shape2 = paramMat.filtered[i,4]*(1-CA_trueMAT[i,j])); 
+   PSN_trueMAT[i,j] <- rbeta(1,shape1 = paramMat.filtered[i,4]*logit_link(CA_trueMAT[i,j], a = paramMat.filtered[i,5], b = paramMat.filtered[i,6]),
+                            shape2 = paramMat.filtered[i,4]*(1-logit_link(CA_trueMAT[i,j], a = paramMat.filtered[i,5], b = paramMat.filtered[i,6])));
+   
+   PSN_phenoMAT[i,j] <- rbeta(1,shape1 = paramMat.filtered[i,7]*logit_link(paramMat.filtered[i,11], a = PSN_trueMAT[i,j], b = paramMat.filtered[i,9]),
+                            shape2 = paramMat.filtered[i,7]*(1-logit_link(paramMat.filtered[i,11], a = PSN_trueMAT[i,j], b = paramMat.filtered[i,9])));
+   
+    # CA_obsMAT[i,j] <- logit_link(x=rnorm(1,mean=CA_trueMAT[i,j], sd = CA_trueMAT[i,j]*0.2),a=-3,b=8); 
+   PSN_obsMAT[i,j] <- rbeta(1, shape1 = paramMat.filtered[i,4]*PSN_phenoMAT[i,j], shape2 = paramMat.filtered[i,4]*(1-PSN_phenoMAT[i,j])); 
   }
 }
 
-CA_obsDF <- as.data.frame(t(CA_obsMAT));
+CA_obsDF <- as.data.frame(t(PSN_phenoMAT));
 CA_obsDFmelt <- melt(CA_obsDF);
 CA_obsDFmelt$t <- rep(seq(1,15,1),1000);
 # Showing all trajectories

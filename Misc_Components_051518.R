@@ -51,10 +51,8 @@ library(rstan)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
+# Scrubbing NAs 
 pheno_dat_noNA <- na.omit(pheno_dat)
-str(pheno_dat_noNA)
-str(pheno_dat)
-range(pheno_dat_noNA$pvar)
 # Bringing pvar values off the boundaries for computational reasons
 pheno_dat_noNA$pvar[which(pheno_dat_noNA$pvar == 1)] <- pheno_dat_noNA$pvar[which(pheno_dat_noNA$pvar == 1)] - 0.01
 pheno_dat_noNA$pvar[which(pheno_dat_noNA$pvar == 0)] <- pheno_dat_noNA$pvar[which(pheno_dat_noNA$pvar == 0)] + 0.01
@@ -72,11 +70,12 @@ getwd()
 pheno_datStan <- list(mm = pheno_dat_noNA$mm, pvar = pheno_dat_noNA$pvar, N = length(pheno_dat_noNA$pvar));
 pheno_mod <- stan(file = "pheno_stan.stan", data = pheno_datStan, chains = 4, iter = 500);
 print(pheno_mod)
+pairs(pheno_mod)
 
 library(installr)
 updateR()
 
-ggplot(pheno_dat, aes(x=mm+0.4, y = pvar, group = sqid, color = yearmat)) + geom_point() +
+ggplot(pheno_dat, aes(x=mm, y = pvar, group = sqid, color = yearmat)) + geom_point() +
   stat_function(fun = logit_link, args = list(a=1.4,b=-1.9))
 
 
@@ -94,12 +93,15 @@ LiDAR_PSN$PSN[which(LiDAR_PSN$PSN == 1)] <- LiDAR_PSN$PSN[which(LiDAR_PSN$PSN ==
 
 
 # Data
-LiDAR_PSN_stan <- list(CA = LiDAR_PSN$CA2, PSN = LiDAR_PSN$PSN, N = length(LiDAR_PSN$PSN));
+str(LiDAR_PSN)
+LiDAR_PSN_stan <- list(CA = LiDAR_PSN$CA2, PSN = LiDAR_PSN$PSN, mm =  N = length(LiDAR_PSN$PSN));
 
 # Fitting model
 
 CA_model_stan <- stan(file = "CA_stan.stan", data = LiDAR_PSN_stan, chains = 4, iter = 500); 
 print(CA_model_stan)
+
+
 
 CA_model_stan2 <- stan(file = "CA_stan2.stan", data = LiDAR_PSN_stan, chains = 4, iter = 500); 
 print(CA_model_stan2)
