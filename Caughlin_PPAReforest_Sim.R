@@ -18,13 +18,17 @@ side <- 30; # number of pixels to a side
 seedlingMat_yr <- array(0, c(side,side,nYears));
 seed_inputMat_yr <- array(0, c(side,side,nYears));
 CA_yr <- array(0, c(side^2,nYears));
+
 recruit_prob <- (0.007 + 0.002*cor.surface(30,0,0.1));
 levelplot(recruit_prob) # Fixed recruitment probability on correlated surface 
-seedlingMat_yr[,,1] <- seedlingMat/100; ## Initializes simulation  with recruits
+
+
 CA_yr[,1] <- 0.2 + 0.05*cor.surface(30,0,0.05); ## Initializes simulation with CA 
+seedlingMat <- matrix(0,side,side);
+seedlingMat_yr[,,1] <- seedlingMat/100; ## Initializes simulation  with recruits
 
 distMat <- dist.matrix(side);
-str(distMat)
+
 
 M <- 0.05 
 G <- 0.5

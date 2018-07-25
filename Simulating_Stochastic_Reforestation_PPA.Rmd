@@ -449,7 +449,7 @@ Not quite identical, but extremely close. So the dynamics in this simulation are
 
 BUT, there are some critical observations here. 1) There are no strong year-year variations in canopy cover, and **NO** shifting patterns of autocorrelation. Rather, we see a far more orderly, nucleated reforestation dynamic. 2) The underlying spatial field for recruitment can differ markedly from the pixels showing the most rapid reforestation (and are also NOT spatially proximal to where we are seeding in recruits). Thus, a model of letting recruitment vary by pixel should NOT be used to infer the underlying biological parameter, even IF we have perfect information about canopy area structure. 
 
-If confirmed, this is potentially a HUGE caveat. There are deep parameter interactions, even when holding growth and mortality constant. 
+If confirmed, this is potentially a HUGE caveat. There are deep parameter interactions, even when holding growth and mortality constant. Need to follow up. 
 
 
 #####

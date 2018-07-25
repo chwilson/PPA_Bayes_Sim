@@ -35,9 +35,10 @@ side= 30;  # sides of the raster
 distMat <- dist.matrix(side);
 distMat[1:10,1:10];
 
-str(distMat)
 # Fix output from arbitrary pixel, the distance from that pixel to any other pixel 
-# is given by that row 
+# is given by that row
+
+
 out1 <- 10^7;
 seed_disp <- Alt2Dt2(distMat[1,],a=2,b=1.5);
 sum(seed_disp); # should be < 1 
