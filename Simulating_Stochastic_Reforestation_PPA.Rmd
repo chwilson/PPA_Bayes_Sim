@@ -1,0 +1,463 @@
+---
+title: "Simulating stochastic reforestation per PPA dynamics"
+author: "Chris H. Wilson, Adrii Zayac, T. Trevor Caughlin"
+date: "July 25, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(mvtnorm)   # to draw multivariate normal outcomes
+library(raster)    # to plot stuff
+library(rasterVis) # to plot fancy stuff
+
+```
+
+Reforestation in abandoned tropical agricultural landscapes is critical for conservation and restoration of biodiversity, and enhancement of multiple ecosystem services. A critical question for restoration ecology is how to spatially predict where natural regeneration will lead to successful reforestation, and conversely to identify patches in the landscape where intervention is likely necessary. The goal of this project is to combine a forest demographic model with both field and satellite data in order to scale predictions of canopy cover trajectories. Here we focus on linking a discrete form of the PPA model (see Caughlin et al. 20XX) to Landsat greenness, a LiDAR flyover of canopy structure (in 2012), and a variety of field data informing rates of recruitment, survival, and growth. We accomplish this through Bayesian hierarchical modeling. However, the resulting models are complex and computationally challenging to fit. There are two outstanding problems/questions: 1) How to understand and account for a high level of spatial autocorrelation evident in the greenness time series' for the pixels in our studied landscapes?, and 2) should we expect to be able to discern between qualitatively distinct pixel trajectories, and how do the process parameters interact to deliver different trajectory shapes? 
+
+The present project seeks to understand the underlying dynamics implied by the PPA, ultimately by using stochastic simulation. First, we demonstrate 'typical' pixel trajectories characteristic of various combinations of parameters within the PPA, and couple this with a global sensitivity analysis (1). Next, we show how spatial autocorrelation arises from an explicit model of seed dispersal linking pixels in our landscape (2). Finally, we consider how uncertainty in our ability to link greenness to structure, and various sources of inter-annual noise in the greenness record may impact our ability to infer a signal (3).  
+
+### 
+
+We begin with (1), a qualitative exploration of the PPA dynamics. The code chunk below implements our discrete form of the PPA. Note that this code relies on some matrix trickiness to sum the contributions of discrete cohorts as they are added successively every year The function returns a variable 'ca' that should clarify the mechanics. Note that in present form, the function has arguments for R, a vector with # of recruits per year, and time, which is the length to run simulation. All other parameters are pulled from global environment. This could get tricky later on, so I recommend eventual modification.   
+```{r}
+ag <- 0
+M <- 0.2
+D <- 1
+c1 <- 1.79
+G <- 0.3
+plot_area <- 900
+
+R <- c(5,8,100,150,20,10,10,8,7,15)
+time <- length(R)
+
+
+sum_cohorts <- function(R,time){
+  nmu <- matrix(0,length(R),time) # each row is a cohort path 
+  
+  ca <- matrix(0,length(R),time) # each row is a cohort path 
+  # added at a different time
+  ca2 <- rep(0, time) # each row is a cohort path 
+  
+  t_mat <- matrix(0,length(R),time) # checking the diagonalized
+  # time matrix
+  
+  x <- seq(1,time,1)
+  
+  for(i in 1:length(R)){
+    for(j in 1:length(x)){
+      if(j >= i) {
+        nmu[i,j] <-  exp(-M*(x[j-i+1]-ag))*c1*(D + G*(x[j-i+1]-ag))/plot_area
+        ca[i,j] <-  R[i]*exp(-M*(x[j-i+1]-ag))*c1*(D + G*(x[j-i+1]-ag))/plot_area
+        t_mat[i,j] <-  x[j-i+1]
+        
+      } else{
+        nmu[i,j] <- 0
+        ca[i,j] <- 0
+      }
+    }
+    ca2[i] <-  sum(ca[,i])
+  }
+  return(list(ca=ca,t=t_mat, nmu = nmu, ca2 = ca2))
+}
+
+demo_pix <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_discrete(breaks=seq(1,time,1))
+
+```
+
+The values of the parameters specified lead to a rapid, logistic-type growth, and then diminution after reaching a peak value. What happens if we increase mortality from 0.2 to 0.4? 
+
+
+```{r}
+M <- 0.4
+demo_pix2 <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix2$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_discrete(breaks=seq(1,time,1))
+
+
+
+```
+
+We see that the decline from peak is much sharper! What occurs if we let this particular simulation run longer? Note that to implement this, we will need to do something with the recruitment vector. For simplicity, we are going to have it level off at 15. 
+
+```{r}
+M <- 0.4
+R <- c(5,8,100,150,20,10,10,8,7,15,rep(15,30))
+time <- length(R); 
+
+demo_pix3 <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix3$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_discrete(breaks=seq(1,time,1))
+
+
+```
+
+
+As might be intuitive, we see a leveling off. Closer inspection reveals that this qualitative behavior- rapid logistic increase to a peak and then some kind of dampened exponential decline to a steady state, is entirely driven by variations in recruitment. IF we hold recruitment to the same value year after year, we see instead a type II increase to an asymptote. 
+
+```{r}
+
+M <- 0.4
+R <- rep(15,40)
+time <- length(R)
+
+demo_pix4 <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix4$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_discrete(breaks=seq(1,time,1))
+
+```
+
+One question is whether time variations in other parameters (i.e. growth, mortality) could drive a similar qualitative distinction? To me (Chris) it seems less likely on a priori biological grounds than do large time variations in recruitment. Note that holding R constant means that the discrete cohort summing setup converges to the continuous analytical solution presented in Caughlin et al. (2016). 
+
+
+This qualitative behavior (type II increase) is remarkably durable to perturbations of the mortality and growth parameters. Observe the behavior from the last specification (with R constant), only where growth is increased from 0.3 to 6, and mortality reduced from 0.4 to 0.2 
+
+```{r}
+
+M <- 0.2
+R <- rep(15,40)
+G <- 6
+time <- length(R)
+
+demo_pix5 <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix5$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_discrete(breaks=seq(1,time,1))
+
+```
+
+First, a technical note is that the model has a restricted domain of validity for canopy cover between 0 (no canopy) and 1 (closure). Nevertheless, we see a hint of some logistic behavior at the very beginning (i.e. convex then concave), and then an asymptote. Let's increase resolution for those first values. 
+
+```{r}
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix5$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_continuous(limits = c(1,3),breaks=seq(1,3,1)) + scale_y_continuous(limits = c(0,1))
+
+```
+
+
+Yes, there is indeed some slight convexity evident here. We can magnify this convexity tremendously by decreasing mortality even further. 
+
+
+```{r}
+
+M <- 0.05
+R <- rep(15,40)
+G <- 2
+time <- length(R)
+
+demo_pix6 <- sum_cohorts(R,time)
+
+ggplot(data = data.frame(x=seq(1,time,1),y=demo_pix6$ca2),aes(x=x,y=y)) + geom_line() + theme_bw() + scale_x_continuous(limits = c(1,5),breaks=seq(1,5,1)) + scale_y_continuous(limits = c(0,1))
+
+```
+
+
+To sum up our qualitative exploration, the PPA yields essentially a flexible logistic function. With static parameters, it approaches a type II when mortality is reasonably moderate to high, hiding the convex early increase. However, with low mortality, the period of convexity can be stretched out, even to the point of encompassing the valid output range. It does not appear that manipulations of growth parameter achieve the same qualitative flip within biologic ranges. When we allow time-varying recruitment, the function can accomodate a logistic increase and then a decrease from peak to some lower steady state. 
+
+Andrii/Trevor: I think the next step here is to go over and systematically check these findings, and perform a sensitivity analysis. 
+
+
+### 
+
+For phase 2, I will now introduce a framework for stochastic landscape regeneration given dispersal. The first step is to introduce the functions that will be used for this phase. These are borrowed from Petr Keil, and enable creation of critical quantities like distance matrices, correlated surfaces and matrix to raster conversion (for plotting). 
+
+```{r}
+### THe functions below are from Petr Keil http://www.petrkeil.com/?p=1910
+
+# function that makes distance matrix for a side*side 2D array  
+dist.matrix <- function(side)
+{
+  row.coords <- rep(1:side, times=side)
+  col.coords <- rep(1:side, each=side)
+  row.col <- data.frame(row.coords, col.coords)
+  D <- dist(row.col, method="euclidean", diag=TRUE, upper=TRUE)
+  D <- as.matrix(D)
+  return(D)
+}
+
+#function that simulates the autocorrelated 2D array with a given side,
+# and with exponential decay given by lambda
+# (the mean mu is constant over the array, it equals to global.mu
+
+cor.surface <- function(side, global.mu, lambda)
+{
+  D <- dist.matrix(side)
+  # scaling the distance matrix by the exponential decay
+  SIGMA <- exp(-lambda*D)
+  mu <- rep(global.mu, times=side*side)
+  # sampling from the multivariate normal distribution
+  M <- matrix(nrow=side, ncol=side)
+  M[] <- rmvnorm(1, mu, SIGMA)
+  return(M)
+}
+
+# function that converts a matrix to raster and scales its sides to max.ext
+my.rast <- function(mat, max.ext)
+{
+  rast <- raster(mat)
+  rast@extent@xmax <- max.ext
+  rast@extent@ymax <- max.ext
+  return(rast)
+}
+
+```
+
+
+The critical step in these stochastic simulations is that we are going to utilize seed dispersal as the variable that links pixel trajectories in time and space. Below are a variety of candidate dispersal kernels. There is a subtle but important distinction between dispersal density kernels (not constrained to sum to 1), and dispersal distance kernels (sum to 1). The latter result from an area integral over the former (i.e. using polar coordinates). Our critical computational manoeuvre is that we will compute seed input to pixel 'i', at each time step, as the sum of inputs from all other pixels 'j'. This operation requires the **density kernel** and NOT the **distance kernel**. In particular, we use the distance matrix (from code chunk above) as an argument to the density kernel. 
+
+
+```{r}
+# Dispersal distance kernel
+Alt2Dt <- function(x,a,b,s=1){
+  disp <- s*2*pi*x*((b-1)/(pi*a^2))*(1 +(x^2/a^2))^-b;
+  return(disp);
+} # sums to 1
+integrate(Alt2Dt, 0, 20, a = 2, b=2)
+
+# Dispersal density kernel
+Alt2Dt2 <- function(x,a,b,Q=1){
+  disp <- Q*((b-1)/(pi*a^2))*(1 +(x^2/a^2))^-b;
+  return(disp);
+} # does not sum to 1 
+integrate(Alt2Dt2, 0, 20, a = 2, b=2)
+
+Alt2Dt2_NDD <- function(x,a,b,k){
+  disp <- (1/(1+((1/0.01)-1)*exp(-k*x)))*((b-1)/(pi*a^2))*(1 +(x^2/a^2))^-b;
+  return(disp);
+} #
+
+Alt2Dt_NDD <- function(x,a,b,k){
+  disp <- (2*pi*x)*(1/(1+((1/0.01)-1)*exp(-k*x)))*((b-1)/(pi*a^2))*(1 +(x^2/a^2))^-b;
+  return(disp);
+} 
+
+```
+
+With these options, we will proceed with the canonical choice, Alt2Dt2.
+
+
+```{r}
+side= 30;  # sides of the raster
+distMat <- dist.matrix(side);
+# Fix output from arbitrary pixel, the distance from that pixel to any other pixel 
+# is given by that row
+out1 <- 10^7;
+seed_disp <- Alt2Dt2(distMat[1,],a=2,b=1.5);
+sum(seed_disp); # should be < 1 
+seed_dispMat <- matrix(seed_disp,nrow = side, ncol = side);
+seed_inputMat <- drop(10^7)*seed_dispMat;
+
+levelplot(seed_inputMat) # check 
+
+```
+
+Note that a necessary consequence of this implementation is that some portion of the total seed output from this simulation will fall outside the simulated parcel (because we are assuming symmetric dispersal using the dispersal density in all directions). 
+
+
+
+With these tools in hand, we implement the full stochastic simulation model in the code chunk below. I (Chris) have tried to document all of the steps, but feel free to ask for clarification. In essence, we have an array of matrices for seeds and seedlings. Every year, output from each pixel is a simple function of CA in that pixel (can be modified). 
+
+
+```{r}
+nYears <- 10; 
+side <- 30; # number of pixels to a side 
+
+seedlingMat_yr <- array(0, c(side,side,nYears));
+seed_inputMat_yr <- array(0, c(side,side,nYears));
+CA_yr <- array(0, c(side^2,nYears));
+recruit_prob <- (0.007 + 0.002*cor.surface(30,0,0.1));
+levelplot(recruit_prob) # Fixed recruitment probability on correlated surface 
+
+# Totally arbitrary initial condition for seedling matrix 
+seedlingMat <- matrix(c(30,30,30,30,rep(0,side*side-4)),side,side);
+
+seedlingMat_yr[,,1] <- seedlingMat; ## Initializes simulation  with recruits
+CA_yr[,1] <- 0.2 + 0.05*cor.surface(30,0,0.05); ## Initializes simulation with CA 
+
+distMat <- dist.matrix(side);
+
+
+M <- 0.05 
+G <- 0.5
+
+########## Running the simulations 
+
+for(k in 2:nYears){ 
+
+  # Compute output as a function of canopy area in time t - 1 
+  out_corr <- matrix(CA_yr[,k-1]*10^5,nrow = side, ncol = side); 
+  
+  # setting up an array of matrices, one for each pixel for seed inputs
+
+  seed_inputArray <- array(0, c(side^2,side,side));
+  for(i in 1:(side^2)){ 
+    # Stochastic dispersal process
+    seed_disp <- Alt2Dt2(distMat[i,],a=1.2,b=2.5);
+    seed_dispMat <- matrix(seed_disp,nrow = side, ncol = side);
+    
+    seed_inputArray[i,,] <- drop(as.vector(out_corr)[i])*seed_dispMat;
+    # loops through and generates seed inputs to each pixel. 
+    
+  }
+  
+  # convert to a stochastic matrix 
+  seed_inputMat <- matrix(0, nrow=side, ncol=side);
+  for (i in 1:side) {
+    for (j in 1:side) {
+      seed_inputMat[i,j] <- rpois(1,lambda=sum(seed_inputArray[,i,j]));
+      # seed input is now a Poisson process 
+    }
+  }
+  
+  
+  seedlingMat <- matrix(0,nrow = side,ncol = side);
+  for(i in 1:nrow(seedlingMat)){
+    for(j in 1:ncol(seedlingMat)){
+      # stochastic recruitment process
+      seedlingMat[i,j] <- rbinom(1,size =round(seed_inputMat[i,j]),prob=recruit_prob[i,j]);
+    }
+  }
+  
+  seedlingMat_yr[,,k] <- seedlingMat;
+  seed_inputMat_yr[,,k] <- seed_inputMat; 
+  
+  seedlingMat_yr2 <- array(seedlingMat_yr, c(side^2,nYears));
+  
+  for(pp in 1:(side^2)){
+    
+    # deterministic growth of cohorts according to PPA 
+    CA_yr[pp,k] <- sum_cohorts(seedlingMat_yr2[pp,1:k]/10,k)$ca2[k];
+    # This is cohort summing function developed earlier that represents the
+    # discrete form of PPA 
+    
+  }
+  
+}
+
+########### Plotting Output 
+
+# Canopy cover 
+
+CA.list <- list(my.rast(matrix(CA_yr[,1],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,2],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,3],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,4],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,5],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,6],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,7],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,8],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,9],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,10],side,side),max.ext=side))
+CC <- stack(CA.list)
+names(CC) <- c("year 1","year 2", "year 3",
+               "year 4","year 5", "year 6",
+               "year 7","year 8", "year 9",
+               "year 10")
+
+levelplot(CC)
+
+```
+
+Eh voila! We have a stochastic reforestation simulation. Notice the development of a nucleated pattern of recovery. Also, we year 1 is our initialized canopy cover, and recall that we stacked recruits in the first four cells top-left-corner. What is guiding this spatial pattern? Well, recall that we specified a recruitment probability surface. Let's take a look. 
+
+```{r}
+levelplot(recruit_prob)
+```
+
+Not quite a great match either! Let's re-roll the simulation from same inits. 
+
+```{r}
+########## Running the simulations 
+
+for(k in 2:nYears){ 
+
+  # Compute output as a function of canopy area in time t - 1 
+  out_corr <- matrix(CA_yr[,k-1]*10^5,nrow = side, ncol = side); 
+  
+  # setting up an array of matrices, one for each pixel for seed inputs
+
+  seed_inputArray <- array(0, c(side^2,side,side));
+  for(i in 1:(side^2)){ 
+    # Stochastic dispersal process
+    seed_disp <- Alt2Dt2(distMat[i,],a=1.2,b=2.5);
+    seed_dispMat <- matrix(seed_disp,nrow = side, ncol = side);
+    
+    seed_inputArray[i,,] <- drop(as.vector(out_corr)[i])*seed_dispMat;
+    # loops through and generates seed inputs to each pixel. 
+    
+  }
+  
+  # convert to a stochastic matrix 
+  seed_inputMat <- matrix(0, nrow=side, ncol=side);
+  for (i in 1:side) {
+    for (j in 1:side) {
+      seed_inputMat[i,j] <- rpois(1,lambda=sum(seed_inputArray[,i,j]));
+      # seed input is now a Poisson process 
+    }
+  }
+  
+  
+  seedlingMat <- matrix(0,nrow = side,ncol = side);
+  for(i in 1:nrow(seedlingMat)){
+    for(j in 1:ncol(seedlingMat)){
+      # stochastic recruitment process
+      seedlingMat[i,j] <- rbinom(1,size =round(seed_inputMat[i,j]),prob=recruit_prob[i,j]);
+    }
+  }
+  
+  seedlingMat_yr[,,k] <- seedlingMat;
+  seed_inputMat_yr[,,k] <- seed_inputMat; 
+  
+  seedlingMat_yr2 <- array(seedlingMat_yr, c(side^2,nYears));
+  
+  for(pp in 1:(side^2)){
+    
+    # deterministic growth of cohorts according to PPA 
+    CA_yr[pp,k] <- sum_cohorts(seedlingMat_yr2[pp,1:k]/10,k)$ca2[k];
+    # This is cohort summing function developed earlier that represents the
+    # discrete form of PPA 
+    
+  }
+  
+}
+
+########### Plotting Output 
+
+# Canopy cover 
+
+CA.list <- list(my.rast(matrix(CA_yr[,1],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,2],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,3],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,4],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,5],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,6],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,7],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,8],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,9],side,side),max.ext=side),
+               my.rast(matrix(CA_yr[,10],side,side),max.ext=side))
+CC <- stack(CA.list)
+names(CC) <- c("year 1","year 2", "year 3",
+               "year 4","year 5", "year 6",
+               "year 7","year 8", "year 9",
+               "year 10")
+
+levelplot(CC)
+```
+
+Not quite identical, but extremely close. So the dynamics in this simulation are mostly governed by parameter choices and the stochastic correlated surfaces that initialize the whole thing. If you repeat the whole simulation, you will get surprisingly divergent results, but once params and initial correlated surfaces are fixed, qualitative behavior is pretty settled too. 
+
+BUT, there are some critical observations here. 1) There are no strong year-year variations in canopy cover, and **NO** shifting patterns of autocorrelation. Rather, we see a far more orderly, nucleated reforestation dynamic. 2) The underlying spatial field for recruitment can differ markedly from the pixels showing the most rapid reforestation (and are also NOT spatially proximal to where we are seeding in recruits). Thus, a model of letting recruitment vary by pixel should NOT be used to infer the underlying biological parameter, even IF we have perfect information about canopy area structure. 
+
+If confirmed, this is potentially a HUGE caveat. There are deep parameter interactions, even when holding growth and mortality constant. 
+
+
+#####
+
+For phase (3), fitting simulated data to full Bayes model, we have a number of tasks ahead of us. In a separate file, I have begun some simulation-based calibration that has shown promising results for inference on a single pixel. Obviously, we need to follow up on the results from forward simulation above, and then add "error" due to greenness as highly imperfect proxy for canopy area (LiDar model), and inter-annual stochasticity. 
+
+
+
+
+
+
